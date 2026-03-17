@@ -1,0 +1,76 @@
+{
+    "node_name": "./",
+    "task": "classification",
+    "n_out": 2,
+    "model_type": "logistic_regression",
+    "feature_names": [
+        "patient_demographics_gender",
+        "patient_demographics_age"
+    ],
+    "target_names": [
+        "outcome_in_hospital_mortality"
+    ],
+    "metrics": null,
+    "features_meta": {
+        "patient_demographics_gender": {
+            "name": "patient_demographics_gender",
+            "dataType": "NOMINAL",
+            "stats": {
+                "numOfNotNull": 7845,
+                "valueSet": [
+                    "female",
+                    "male"
+                ],
+                "cardinalityPerItem": {
+                    "female": 2814,
+                    "male": 5031
+                }
+            }
+        },
+        "patient_demographics_age": {
+            "name": "patient_demographics_age",
+            "dataType": "NUMERIC",
+            "stats": {
+                "numOfNotNull": 9980,
+                "min": 18,
+                "max": 97,
+                "avg": 56.4,
+                "q1": 42,
+                "q2": 58,
+                "q3": 71,
+                "histogram": [
+                    {
+                        "bin": 30,
+                        "count": 1500
+                    },
+                    {
+                        "bin": 45,
+                        "count": 2400
+                    },
+                    {
+                        "bin": 60,
+                        "count": 3000
+                    },
+                    {
+                        "bin": 75,
+                        "count": 2100
+                    },
+                    {
+                        "bin": 90,
+                        "count": 980
+                    }
+                ]
+            }
+        }
+    },
+    "outcomes_meta": {
+        "outcome_in_hospital_mortality": {
+            "name": "outcome_in_hospital_mortality",
+            "dataType": "BOOLEAN",
+            "stats": {
+                "numOfNotNull": 10000,
+                "numOfTrue": 820
+            }
+        }
+    }
+}

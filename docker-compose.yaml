@@ -1,0 +1,10 @@
+version: "1.0"
+
+services:
+  inference-api:
+    build: .
+    container_name: inference-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./sandbox:/app/sandbox
