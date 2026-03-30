@@ -84,7 +84,11 @@ def predict(input_data: InputData):
 
     preds = engine.predict(df)
 
-    return {"predictions": preds}
+    response = {"predictions": preds}
+    if hasattr(engine.model, "explain"):
+        response["explanations"] = engine.explain(df)
+
+    return response
 
 @app.post("/predict_from_srdc")
 def predict_from_srdc(req: SRDCRequest):
@@ -115,10 +119,15 @@ def predict_from_srdc(req: SRDCRequest):
 
     preds = engine.predict(df)
 
-    return {
+    response = {
         "input_features": features_dict,
         "predictions": preds
     }
+
+    if hasattr(engine.model, "explain"):
+        response["explanations"] = engine.explain(df)
+
+    return response
 
 
 @app.post("/reload")
