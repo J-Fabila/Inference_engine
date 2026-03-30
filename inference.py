@@ -9,7 +9,7 @@ sys.path.append("/home/jorge/workdir/flcore-suite")
 
 import re
 
-def load_model(model_dir):
+def load_model(model_dir,model,task):
 
     model_dir = Path(model_dir)
 
@@ -17,7 +17,19 @@ def load_model(model_dir):
         match = re.search(r'_round_(\d+)', filepath.name)
         return int(match.group(1)) if match else -1
 
-    metadata_files = list(model_dir.glob("*_model_metadata.json"))
+    if model and task:
+        model_name = f"{model}_{task}"
+        metadata_files = list(model_dir.glob(f"{model_name}*_model_metadata.json"))
+        if not metadata_files:
+            metadata_path = model_dir / f"{model_name}_model_metadata.json"
+            if metadata_path.exists():
+                metadata_files = [metadata_path]
+    else:
+        metadata_files = list(model_dir.glob("*_model_metadata.json"))
+
+    if not metadata_files:
+        raise FileNotFoundError(f"No metadata files found in {model_dir}")
+
     metadata_files.sort(key=get_round, reverse=True)
     metadata_file = metadata_files[0]
 
@@ -26,7 +38,29 @@ def load_model(model_dir):
 
     model_type = metadata.get("model_type", "").lower()
 
-    model_files = list(model_dir.glob("*_model.joblib")) + list(model_dir.glob("*_model.pkl")) + list(model_dir.glob("*_model.npz"))
+    if model and task:
+        model_files = (
+            list(model_dir.glob(f"{model_name}*_model.joblib")) +
+            list(model_dir.glob(f"{model_name}*_model.pkl")) +
+            list(model_dir.glob(f"{model_name}*_model.npz")) +
+            list(model_dir.glob(f"{model_name}*_model.json"))
+        )
+        if not model_files:
+            for ext in [".joblib", ".pkl", ".npz", ".json"]:
+                exact_path = model_dir / f"{model_name}_model{ext}"
+                if exact_path.exists():
+                    model_files.append(exact_path)
+    else:
+        model_files = (
+            list(model_dir.glob("*_model.joblib")) + 
+            list(model_dir.glob("*_model.pkl")) + 
+            list(model_dir.glob("*_model.npz")) +
+            list(model_dir.glob("*_model.json"))
+        )
+        
+    if not model_files:
+        raise FileNotFoundError(f"No model files found in {model_dir}")
+
     model_files.sort(key=get_round, reverse=True)
     model_file = model_files[0]
 
@@ -154,6 +188,25 @@ class InferenceEngine:
 
             preds = [bool(p) for p in preds]
 
+        elif dtype == "NUMERIC":
+
+            stats = target_meta.get("stats", {})
+
+            if self.normalization_method == "IQR":
+                q1 = stats.get("q1")
+                q2 = stats.get("q2")
+                q3 = stats.get("q3")
+
+                if None not in (q1, q2, q3):
+                    preds = [p * (q3 - q1) + q2 for p in preds]
+
+            elif self.normalization_method == "MIN_MAX":
+                mini = stats.get("min")
+                maxi = stats.get("max")
+
+                if None not in (mini, maxi):
+                    preds = [p * (maxi - mini) + mini for p in preds]
+
         if hasattr(preds, "tolist"):
             preds = preds.tolist()
         elif not isinstance(preds, list):
@@ -161,16 +214,34 @@ class InferenceEngine:
 
         return preds
 
-"""
+    def explain(self, df):
+        """
+        Runs explainability using SHAP via the model's `explain` method.
+        Only runs if the underlying model implements this method.
+        """
+        if hasattr(self.model, "explain"):
+            X = self.preprocess(df)
+            return self.model.explain(X)
+        return None
+
 #**** * * * * * *  *  *   *   *     *  *  * * * * *******  INPUT
-model_path = "sandbox/model"
-model, metadata = load_model(model_path)
-new_data_path = "/home/yuca/DT4H/completo/flcore-main/dataset/bucarest_sintetico/synthetic_dt4h_dataset.csv"
+model_path = "/home/jorge/workdir/Inference_engine/sandbox/experiment_1/models"
+# test model and task names explicitly so there is no NameError 
+test_model = "cox"
+test_task = "survival"
+print(test_model,test_task)
+
+model, metadata = load_model(model_path, model=test_model, task=test_task)
+new_data_path = "/home/jorge/workdir/flcore-suite/dataset/bucarest_sintetico/synthetic_dt4h_dataset.csv"
+#new_data_path = "/home/jorge/workdir/flcore-suite/dataset/bucarest_sintetico/synthetic_survival.csv"
 #**** * * * * * *  *  *   *   *     *  *  * * * * *******  INPUT
 engine = InferenceEngine(model, metadata)
 
 df_new = pd.read_csv(new_data_path)
 
 predictions = engine.predict(df_new)
-print(predictions)
-"""
+print("Predictions:", predictions)
+
+explanations = engine.explain(df_new)
+if explanations is not None:
+    print("Explanations:", explanations)
