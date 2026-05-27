@@ -12,39 +12,36 @@ import argparse
 import sys
 
 
-def _parse_cli_args():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--model-path", default="./sandbox/experiment_1/models")
-    parser.add_argument("--initial-model", default="cox")
-    parser.add_argument("--initial-task", default="survival")
-    parser.add_argument("--feast-base-url", default="https://matrix.srdc.com.tr/ai4hf/feast/api")
-    parser.add_argument("--fhir-server", default="myFhirServer")
-    parser.add_argument("--feature-set-id", default="maggic-mlp-fs")
-    args, _ = parser.parse_known_args()
-    return args
-
-
-_args = _parse_cli_args()
-
-MODEL_PATH = _args.model_path
+# Configuración global (se puede actualizar desde la línea de comandos en __main__)
+CONFIG = {
+    "model_path": "./sandbox/experiment_1/models",
+    "initial_model": "cox",
+    "initial_task": "survival",
+    "feast_base_url": "https://matrix.srdc.com.tr/ai4hf/feast/api",
+    "fhir_server": "myFhirServer",
+    "feature_set_id": "maggic-mlp-fs",
+}
 
 MODEL_CACHE = {}
 
+# Placeholders que se inicializarán en el evento startup
+engine = None
+metadata = None
+
 def get_engine(model_name: str):
     if model_name not in MODEL_CACHE:
-        model, metadata = load_model(MODEL_PATH, model=model_name, task=None)
-        MODEL_CACHE[model_name] = InferenceEngine(model, metadata)
+        model, meta = load_model(CONFIG["model_path"], model=model_name, task=None)
+        MODEL_CACHE[model_name] = InferenceEngine(model, meta)
     return MODEL_CACHE[model_name]
 
-print("INICIA MAIN")
-model, metadata = load_model(MODEL_PATH, _args.initial_model, _args.initial_task)
-engine = InferenceEngine(model, metadata)
-print("Model loaded and engine initialized")
+@app.on_event("startup")
+def startup_event():
+    global engine, metadata
+    print("INICIA STARTUP: cargando modelo según CONFIG")
+    model, metadata = load_model(CONFIG["model_path"], CONFIG["initial_model"], CONFIG["initial_task"])
+    engine = InferenceEngine(model, metadata)
+    print("Model loaded and engine initialized")
 
-# Valores configurables vía línea de comandos
-FEAST_BASE_URL = _args.feast_base_url
-FHIR_SERVER = _args.fhir_server
-FEATURE_SET_ID = _args.feature_set_id
 
 app = FastAPI(title="Inference API")
 
@@ -64,7 +61,7 @@ class SRDCRequest(BaseModel):
 
 def retrieve_feature_values(subject: str, time_point: str):
     url = (
-        f"{FEAST_BASE_URL}/DataSource/{FHIR_SERVER}/FeatureSet/{FEATURE_SET_ID}"
+        f"{CONFIG['feast_base_url']}/DataSource/{CONFIG['fhir_server']}/FeatureSet/{CONFIG['feature_set_id']}"
         f"/$retrieve-feature-values"
         f"?subject={subject}&asOf={time_point}&format=fhir&outcome=true"
     )
@@ -325,9 +322,45 @@ def predict_from_srdc(req: SRDCRequest):
     return response
 
 
-@app.post("/reload") # PATH MODEL Y TASK QUE TAMBIEN VENGAN DEL CMD LINE
-def reload_model(path: str = MODEL_PATH, model: str = _args.initial_model, task: str = _args.initial_task):
-    global engine
-    model, metadata = load_model(path, model, task)
-    engine = InferenceEngine(model, metadata)
+@app.post("/reload")
+def reload_model(path: Optional[str] = None, model: Optional[str] = None, task: Optional[str] = None):
+    global engine, metadata
+    path = path or CONFIG["model_path"]
+    model = model or CONFIG["initial_model"]
+    task = task or CONFIG["initial_task"]
+    model_obj, metadata = load_model(path, model, task)
+    engine = InferenceEngine(model_obj, metadata)
     return {"status": "reloaded"}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-path", default=CONFIG["model_path"]) 
+    parser.add_argument("--initial-model", default=CONFIG["initial_model"]) 
+    parser.add_argument("--initial-task", default=CONFIG["initial_task"]) 
+    parser.add_argument("--feast-base-url", default=CONFIG["feast_base_url"]) 
+    parser.add_argument("--fhir-server", default=CONFIG["fhir_server"]) 
+    parser.add_argument("--feature-set-id", default=CONFIG["feature_set_id"]) 
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    # Actualizar CONFIG con valores CLI
+    CONFIG.update(
+        {
+            "model_path": args.model_path,
+            "initial_model": args.initial_model,
+            "initial_task": args.initial_task,
+            "feast_base_url": args.feast_base_url,
+            "fhir_server": args.fhir_server,
+            "feature_set_id": args.feature_set_id,
+        }
+    )
+
+    # Ejecutar uvicorn con esta app
+    try:
+        import uvicorn
+
+        uvicorn.run("api:app", host=args.host, port=args.port, reload=False)
+    except Exception:
+        print("uvicorn no disponible. Ejecuta: uvicorn api:app --host 0.0.0.0 --port 8000")

@@ -4,9 +4,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import sys
-
-sys.path.append("/home/jorge/workdir/flcore-suite")
-
+import os
 import re
 
 def load_model(model_dir,model,task):
@@ -223,25 +221,3 @@ class InferenceEngine:
             X = self.preprocess(df)
             return self.model.explain(X)
         return None
-
-#**** * * * * * *  *  *   *   *     *  *  * * * * *******  INPUT
-model_path = "/home/jorge/workdir/Inference_engine/sandbox/experiment_1/models"
-# test model and task names explicitly so there is no NameError 
-test_model = "cox"
-test_task = "survival"
-print(test_model,test_task)
-
-model, metadata = load_model(model_path, model=test_model, task=test_task)
-new_data_path = "/home/jorge/workdir/flcore-suite/dataset/bucarest_sintetico/synthetic_dt4h_dataset.csv"
-#new_data_path = "/home/jorge/workdir/flcore-suite/dataset/bucarest_sintetico/synthetic_survival.csv"
-#**** * * * * * *  *  *   *   *     *  *  * * * * *******  INPUT
-engine = InferenceEngine(model, metadata)
-
-df_new = pd.read_csv(new_data_path)
-
-predictions = engine.predict(df_new)
-print("Predictions:", predictions)
-
-explanations = engine.explain(df_new)
-if explanations is not None:
-    print("Explanations:", explanations)
