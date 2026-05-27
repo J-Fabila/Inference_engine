@@ -34,6 +34,8 @@ def get_engine(model_name: str):
         MODEL_CACHE[model_name] = InferenceEngine(model, meta)
     return MODEL_CACHE[model_name]
 
+app = FastAPI(title="Inference API")
+
 @app.on_event("startup")
 def startup_event():
     global engine, metadata
@@ -42,8 +44,6 @@ def startup_event():
     engine = InferenceEngine(model, metadata)
     print("Model loaded and engine initialized")
 
-
-app = FastAPI(title="Inference API")
 
 class PredictRequest(BaseModel):
     patientId: str
