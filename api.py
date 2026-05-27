@@ -8,8 +8,25 @@ import requests
 from datetime import datetime
 
 from inference import load_model, InferenceEngine
+import argparse
+import sys
 
-MODEL_PATH = "./sandbox/experiment_1/models"
+
+def _parse_cli_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--model-path", default="./sandbox/experiment_1/models")
+    parser.add_argument("--initial-model", default="cox")
+    parser.add_argument("--initial-task", default="survival")
+    parser.add_argument("--feast-base-url", default="https://matrix.srdc.com.tr/ai4hf/feast/api")
+    parser.add_argument("--fhir-server", default="myFhirServer")
+    parser.add_argument("--feature-set-id", default="maggic-mlp-fs")
+    args, _ = parser.parse_known_args()
+    return args
+
+
+_args = _parse_cli_args()
+
+MODEL_PATH = _args.model_path
 
 MODEL_CACHE = {}
 
@@ -19,13 +36,15 @@ def get_engine(model_name: str):
         MODEL_CACHE[model_name] = InferenceEngine(model, metadata)
     return MODEL_CACHE[model_name]
 
-model, metadata = load_model(MODEL_PATH,"cox", "survival")
+print("INICIA MAIN")
+model, metadata = load_model(MODEL_PATH, _args.initial_model, _args.initial_task)
 engine = InferenceEngine(model, metadata)
+print("Model loaded and engine initialized")
 
-
-FEAST_BASE_URL = "https://matrix.srdc.com.tr/ai4hf/feast/api"
-FHIR_SERVER = "myFhirServer"
-FEATURE_SET_ID = "maggic-mlp-fs"
+# Valores configurables vía línea de comandos
+FEAST_BASE_URL = _args.feast_base_url
+FHIR_SERVER = _args.fhir_server
+FEATURE_SET_ID = _args.feature_set_id
 
 app = FastAPI(title="Inference API")
 
@@ -173,6 +192,7 @@ def build_prediction_payload(
     explanations: Any,
     timestamp: str,
 ) -> Dict[str, Any]:
+    print(":::::::::::::::::::::::::::::::::: BUILD PAYLOAD")
     payload = {
         "event_type": "prediction",
         "prediction_id": str(uuid4()),
@@ -186,7 +206,19 @@ def build_prediction_payload(
         "@timestamp": timestamp,
     }
 
-    return payload
+    global_data = {
+        "distribution_data": [5, 10, 24, 12, 30, 40, 10, 20, 30, 10],
+        "median": "0.25",
+        "percentile": "0.1",
+    }
+
+    out = {
+        "prediction": payload,
+        "explanations": explanations,
+        "global_data": global_data,
+    }
+    print(":::::::::::::::::::::::::::",out)
+    return out
 
 @app.get("/")
 def root():
@@ -293,9 +325,9 @@ def predict_from_srdc(req: SRDCRequest):
     return response
 
 
-@app.post("/reload")
-def reload_model():
+@app.post("/reload") # PATH MODEL Y TASK QUE TAMBIEN VENGAN DEL CMD LINE
+def reload_model(path: str = MODEL_PATH, model: str = _args.initial_model, task: str = _args.initial_task):
     global engine
-    model, metadata = load_model("./sandbox/experiment_1/models","cox", "survival")
+    model, metadata = load_model(path, model, task)
     engine = InferenceEngine(model, metadata)
     return {"status": "reloaded"}
