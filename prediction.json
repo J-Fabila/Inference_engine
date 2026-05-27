@@ -1,0 +1,18 @@
+{
+    "event_type": "prediction",
+    "prediction_id": "09374377-6dac-41be-8209-69b87116bca1",
+    "user_id": "b569d65d-4677-4032-845e-0f05fc96625f",
+    "patient_id": "79af2eae-428b-445f-9633-c0f1a84604dd",
+    "model_id": "a44fde8d-3265-4e5c-9b70-7bccf7e545a2",
+    "model_name": "Model 3",
+    "input_predictors": {
+      "age": 44,
+      "gender": "male",
+      "last_systolicBp":139,
+      "last_diastolicBp":100,
+      "last_weight": 56
+    },
+    "ai_prediction": 0.16611663478024097,
+    "confidence_score": 0.4915289260552467,
+    "@timestamp": "2025-09-10T01:13:55.048Z"
+}
