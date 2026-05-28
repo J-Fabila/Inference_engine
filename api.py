@@ -178,6 +178,51 @@ def _extract_confidence_score(explanations: Any) -> Optional[float]:
         return None
 
 
+def _build_global_data(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {
+            "distribution_data": [],
+            "median": None,
+            "percentile": None,
+        }
+
+    candidate_stats = None
+
+    for feature_meta in metadata.get("features_meta", {}).values():
+        stats = feature_meta.get("stats", {})
+        histogram = stats.get("histogram")
+        if isinstance(histogram, list) and histogram:
+            candidate_stats = stats
+            break
+
+    if candidate_stats is None:
+        for outcome_meta in metadata.get("outcomes_meta", {}).values():
+            stats = outcome_meta.get("stats", {})
+            histogram = stats.get("histogram")
+            if isinstance(histogram, list) and histogram:
+                candidate_stats = stats
+                break
+
+    if candidate_stats is None:
+        return {
+            "distribution_data": [],
+            "median": None,
+            "percentile": None,
+        }
+
+    histogram = candidate_stats.get("histogram", [])
+    distribution_data = [bucket.get("count") for bucket in histogram if bucket.get("count") is not None]
+
+    median = candidate_stats.get("q2")
+    percentile = candidate_stats.get("q1")
+
+    return {
+        "distribution_data": distribution_data,
+        "median": str(median) if median is not None else None,
+        "percentile": str(percentile) if percentile is not None else None,
+    }
+
+
 def build_prediction_payload(
     *,
     patient_id: str,
@@ -188,6 +233,7 @@ def build_prediction_payload(
     preds: Any,
     explanations: Any,
     timestamp: str,
+    metadata: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     print(":::::::::::::::::::::::::::::::::: BUILD PAYLOAD")
     payload = {
@@ -203,11 +249,7 @@ def build_prediction_payload(
         "@timestamp": timestamp,
     }
 
-    global_data = {
-        "distribution_data": [5, 10, 24, 12, 30, 40, 10, 20, 30, 10],
-        "median": "0.25",
-        "percentile": "0.1",
-    }
+    global_data = _build_global_data(metadata)
 
     out = {
         "prediction": payload,
@@ -271,6 +313,7 @@ def predict(req: PredictRequest):
         preds=preds,
         explanations=explanations,
         timestamp=req.date,
+        metadata=metadata,
     )
 
     return response
@@ -317,6 +360,7 @@ def predict_from_srdc(req: SRDCRequest):
         preds=preds,
         explanations=explanations,
         timestamp=time_point,
+        metadata=metadata,
     )
 
     return response
