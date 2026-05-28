@@ -101,7 +101,93 @@ def extract_values(items):
 
     return values
 
-def format_output(preds, explanations, feature_names):
+
+def _named_feature_list(values: list, feature_names: list) -> list:
+    """
+    Convierte una lista de valores numéricos en una lista de objetos
+    {"name": <feature_name>, "value": <value>} usando los nombres de features
+    del metadata (terminología FEAST). Si la longitud no coincide, usa índices genéricos.
+    """
+    if len(values) == len(feature_names):
+        return [{"name": feature_names[i], "value": v} for i, v in enumerate(values)]
+    return [{"name": f"feature_{i}", "value": v} for i, v in enumerate(values)]
+
+
+def _build_horizon_stats(metadata: Optional[Dict[str, Any]], horizon: Any) -> Dict[str, Any]:
+    """
+    Extrae distribution_data, percentile y mean desde metadata para un horizonte concreto.
+    Busca primero en outcomes_meta filtrando por horizonte; si no encuentra, usa features_meta.
+    """
+    empty = {"distribution_data": [], "percentile": None, "mean": None}
+
+    if not isinstance(metadata, dict):
+        return empty
+
+    horizon_key = str(horizon)
+
+    # Buscar en outcomes_meta una entrada que corresponda a este horizonte
+    for outcome_name, outcome_meta in metadata.get("outcomes_meta", {}).items():
+        # Algunos metadata codifican el horizonte en el nombre o en un campo explícito
+        meta_horizon = str(outcome_meta.get("horizon", ""))
+        if meta_horizon and meta_horizon != horizon_key:
+            continue
+
+        stats = outcome_meta.get("stats", {})
+        histogram = stats.get("histogram", [])
+        if not isinstance(histogram, list) or not histogram:
+            continue
+
+        distribution_data = [
+            bucket.get("count") for bucket in histogram if bucket.get("count") is not None
+        ]
+        median = stats.get("q2")
+        mean = stats.get("mean")
+
+        return {
+            "distribution_data": distribution_data,
+            "percentile": str(median) if median is not None else None,
+            "mean": str(mean) if mean is not None else None,
+        }
+
+    # Fallback: usar el primer outcomes_meta disponible (sin filtrar por horizonte)
+    for outcome_name, outcome_meta in metadata.get("outcomes_meta", {}).items():
+        stats = outcome_meta.get("stats", {})
+        histogram = stats.get("histogram", [])
+        if not isinstance(histogram, list) or not histogram:
+            continue
+
+        distribution_data = [
+            bucket.get("count") for bucket in histogram if bucket.get("count") is not None
+        ]
+        median = stats.get("q2")
+        mean = stats.get("mean")
+
+        return {
+            "distribution_data": distribution_data,
+            "percentile": str(median) if median is not None else None,
+            "mean": str(mean) if mean is not None else None,
+        }
+
+    return empty
+
+
+def format_output(preds, explanations, feature_names, metadata: Optional[Dict[str, Any]] = None):
+    """
+    Transforma las explanations al formato enriquecido por horizonte:
+
+    [
+      {
+        "horizon": "1",
+        "score": "0.32",
+        "shap_data": [{"name": "feature_x", "value": 0.12}, ...],
+        "contribution_data": [{"name": "feature_x", "value": 0.05}, ...],
+        "distribution_data": [...],
+        "percentile": "0.2",
+        "mean": "0.3"
+      },
+      ...
+    ]
+    """
     if not explanations or not isinstance(explanations, list):
         return preds, explanations
 
@@ -115,34 +201,56 @@ def format_output(preds, explanations, feature_names):
     formatted = []
 
     for item in patient_exps:
-
         new_item = {}
 
+        # Copiar campos escalares directos
         for key in ["horizon", "score"]:
             if key in item:
                 new_item[key] = str(item[key])
 
-        for key, value in item.items():
-
-            if isinstance(value, list) and all(isinstance(v, (int, float)) for v in value):
-
-                if len(value) == len(feature_names):
-                    new_item[key] = [
-                        {"key": feature_names[i], "value": v}
-                        for i, v in enumerate(value)
-                    ]
+        # Transformar shap_data y contribution_data a [{name, value}]
+        for key in ["shap_data", "contribution_data"]:
+            if key in item:
+                raw = item[key]
+                if isinstance(raw, list) and raw:
+                    if isinstance(raw[0], (int, float)):
+                        # Lista plana de números → convertir con nombres
+                        new_item[key] = _named_feature_list(raw, feature_names)
+                    elif isinstance(raw[0], dict) and "name" in raw[0]:
+                        # Ya tiene formato {name, value} → pasar directamente
+                        new_item[key] = raw
+                    else:
+                        new_item[key] = raw
                 else:
-                    new_item[key] = [
-                        {"key": f"feature_{i}", "value": v}
-                        for i, v in enumerate(value)
-                    ]
+                    new_item[key] = raw
+
+        # Añadir cualquier otro campo numérico (que no sean los ya tratados)
+        for key, value in item.items():
+            if key in new_item or key in ["horizon", "score", "shap_data", "contribution_data"]:
+                continue
+            if isinstance(value, list) and all(isinstance(v, (int, float)) for v in value):
+                new_item[key] = _named_feature_list(value, feature_names)
+            else:
+                new_item[key] = value
+
+        # Inyectar estadísticas de distribución para este horizonte
+        horizon_val = item.get("horizon")
+        horizon_stats = _build_horizon_stats(metadata, horizon_val)
+        new_item["distribution_data"] = horizon_stats["distribution_data"]
+        new_item["percentile"] = horizon_stats["percentile"]
+        new_item["mean"] = horizon_stats["mean"]
 
         formatted.append(new_item)
 
+    # Las explanations formateadas se devuelven; global_data ya no se usa por separado
     return formatted, None
 
 
 def _to_scalar_prediction(preds: Any) -> Any:
+    """
+    Suggestion 1: 'Predictions' debe ser un escalar, no un array de booleanos.
+    Se extrae el primer elemento y se convierte a float.
+    """
     if isinstance(preds, list) and preds:
         value = preds[0]
     else:
@@ -178,51 +286,6 @@ def _extract_confidence_score(explanations: Any) -> Optional[float]:
         return None
 
 
-def _build_global_data(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not isinstance(metadata, dict):
-        return {
-            "distribution_data": [],
-            "median": None,
-            "percentile": None,
-        }
-
-    candidate_stats = None
-
-    for feature_meta in metadata.get("features_meta", {}).values():
-        stats = feature_meta.get("stats", {})
-        histogram = stats.get("histogram")
-        if isinstance(histogram, list) and histogram:
-            candidate_stats = stats
-            break
-
-    if candidate_stats is None:
-        for outcome_meta in metadata.get("outcomes_meta", {}).values():
-            stats = outcome_meta.get("stats", {})
-            histogram = stats.get("histogram")
-            if isinstance(histogram, list) and histogram:
-                candidate_stats = stats
-                break
-
-    if candidate_stats is None:
-        return {
-            "distribution_data": [],
-            "median": None,
-            "percentile": None,
-        }
-
-    histogram = candidate_stats.get("histogram", [])
-    distribution_data = [bucket.get("count") for bucket in histogram if bucket.get("count") is not None]
-
-    median = candidate_stats.get("q2")
-    percentile = candidate_stats.get("q1")
-
-    return {
-        "distribution_data": distribution_data,
-        "median": str(median) if median is not None else None,
-        "percentile": str(percentile) if percentile is not None else None,
-    }
-
-
 def build_prediction_payload(
     *,
     patient_id: str,
@@ -236,6 +299,17 @@ def build_prediction_payload(
     metadata: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     print(":::::::::::::::::::::::::::::::::: BUILD PAYLOAD")
+
+    # Obtener nombres de features desde metadata (terminología FEAST)
+    feature_names: list = []
+    if isinstance(metadata, dict):
+        feature_names = list(metadata.get("features_meta", {}).keys())
+        if not feature_names:
+            feature_names = metadata.get("feature_order", [])
+
+    # Formatear explanations con nombres FEAST y estadísticas por horizonte
+    formatted_explanations, _ = format_output(preds, explanations, feature_names, metadata)
+
     payload = {
         "event_type": "prediction",
         "prediction_id": str(uuid4()),
@@ -244,19 +318,20 @@ def build_prediction_payload(
         "model_id": model_id or model_name,
         "model_name": model_name,
         "input_predictors": input_predictors,
+        # Suggestion 1: escalar, no array de booleanos
         "ai_prediction": _to_scalar_prediction(preds),
         "confidence_score": _extract_confidence_score(explanations),
         "@timestamp": timestamp,
     }
 
-    global_data = _build_global_data(metadata)
-
     out = {
         "prediction": payload,
-        "explanations": explanations,
-        "global_data": global_data,
+        # Suggestion 2 & 3: explanations enriquecidas con {name,value} y stats por horizonte
+        "explanations": formatted_explanations,
+        # global_data se mantiene vacío/eliminado; la info está dentro de cada horizonte
+        "global_data": {},
     }
-    print(":::::::::::::::::::::::::::",out)
+    print(":::::::::::::::::::::::::::", out)
     return out
 
 @app.get("/")
