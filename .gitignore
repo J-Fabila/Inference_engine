@@ -1,3 +1,7 @@
 sandbox/experiment_1/models/*
 __pycache__/*
 comandos
+flcore/models/cox/__pycache__/*
+flcore/models/gbs/__pycache__/*
+flcore/models/rsf/__pycache__/*
+flcore/models/nn/__pycache__/*
