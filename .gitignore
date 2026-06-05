@@ -1,4 +1,3 @@
-sandbox/experiment_1/models/*
 __pycache__/*
 comandos
 flcore/models/cox/__pycache__/*
