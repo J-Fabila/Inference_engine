@@ -10,3 +10,4 @@ scikit-survival==0.22.2
 xgboost==1.7.5
 mlxtend==0.23.0
 imblearn==0.0
+shap
